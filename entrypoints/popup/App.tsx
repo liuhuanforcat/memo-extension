@@ -1,33 +1,42 @@
 import './App.css';
 
 type ExtensionAPI = {
-  runtime: { sendMessage: (msg: unknown, cb?: (r: unknown) => void) => void };
+  tabs: {
+    query: (q: object) => Promise<{ id?: number }[]>;
+    sendMessage: (tabId: number, msg: unknown) => Promise<unknown>;
+  };
 };
-const api = ((globalThis as Record<string, unknown>).chrome ?? (globalThis as Record<string, unknown>).browser) as ExtensionAPI | null;
+const api = ((globalThis as Record<string, unknown>).chrome ??
+  (globalThis as Record<string, unknown>).browser) as ExtensionAPI | null;
 
 function App() {
   const handleClickCopy = async () => {
+    if (!api?.tabs) {
+      alert('扩展 API 不可用，请重新加载扩展。');
+      return;
+    }
+
     try {
-      if (!api?.runtime?.sendMessage) {
-        alert('扩展 API 不可用，请重新加载扩展。');
+      const tabs = await api.tabs.query({ active: true, currentWindow: true });
+      const tab = tabs[0];
+
+      if (!tab || tab.id == null) {
+        alert('未找到当前活动标签页');
         return;
       }
-      const result = await new Promise<{ ok?: boolean; error?: string; reason?: string }>((resolve) => {
-        api.runtime.sendMessage({ type: 'EXECUTE_CLICK_COPY' }, (r: unknown) => {
-          resolve((r as { ok?: boolean; error?: string; reason?: string }) ?? {});
-        });
-      });
-      if (result?.ok) {
+
+      const response = (await api.tabs.sendMessage(tab.id, {
+        type: 'CLICK_SUBSCRIBE_COPY',
+      })) as { ok?: boolean } | undefined;
+
+      if (response?.ok) {
         alert('已点击复制按钮，请确认剪贴板是否已更新。');
-      } else if (result?.error) {
-        alert('执行失败：' + result.error + '\n\n请确认：1) 已打开目标页面；2) 在 chrome://extensions 中点击扩展的「重新加载」；3) 若提示新权限，请同意。');
       } else {
-        alert('未找到“复制”按钮，请确认当前页面是否有复制功能。');
+        alert('未找到“复制”按钮，请确认当前页面是否有复制功能，且已在目标页面。');
       }
-    } catch (err) {
-      console.error(err);
-      const msg = err instanceof Error ? err.message : String(err ?? '未知错误');
-      alert('执行失败：' + msg + '\n\n请确认：1) 已打开目标页面；2) 在 chrome://extensions 中点击扩展的「重新加载」；3) 若提示新权限，请同意。');
+    } catch (error) {
+      console.error('发送消息失败:', error);
+      alert('发送消息到当前页面失败，请确认已在目标页面并已注入 content script。');
     }
   };
 
