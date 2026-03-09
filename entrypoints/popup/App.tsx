@@ -1,42 +1,11 @@
 import './App.css';
 
 type ExtensionAPI = {
-  tabs: { query: (q: object) => Promise<{ id?: number }[]>; sendMessage: (tabId: number, msg: unknown) => Promise<unknown> };
   runtime: { sendMessage: (msg: unknown, cb?: (r: unknown) => void) => void };
 };
 const api = ((globalThis as Record<string, unknown>).chrome ?? (globalThis as Record<string, unknown>).browser) as ExtensionAPI | null;
 
 function App() {
-  const sendMessageToActiveTab = (message: unknown) => {
-    if (!api) return;
-    api.tabs
-      .query({ active: true, currentWindow: true })
-      .then((tabs: any) => {
-        const tab = tabs[0];
-
-        if (!tab || tab.id == null) {
-          alert('未找到当前活动标签页');
-          return;
-        }
-
-        return api.tabs.sendMessage(tab.id, message);
-      })
-      .then((response: any) => {
-        if (response !== undefined) {
-          console.log('content script 响应:', response);
-        }
-      })
-      .catch((error: any) => {
-        console.error('发送消息失败:', error);
-        alert('发送消息到当前页面失败，请确认已在目标页面并已注入 content script。');
-      });
-  };
-
-  const handleStartAutomation = () => {
-    sendMessageToActiveTab({ type: 'START_BUSINESS_PAGE_AUTOMATION' });
-    alert('已向当前页面发送“列表自动操作”指令，请切到业务页查看执行情况。');
-  };
-
   const handleClickCopy = async () => {
     try {
       if (!api?.runtime?.sendMessage) {
@@ -65,30 +34,6 @@ function App() {
   return (
     <div style={{ padding: 12, minWidth: 260 }}>
       <h2 style={{ margin: 0, marginBottom: 12 }}>测试助手</h2>
-      <div
-        style={{
-          border: '1px solid #eee',
-          borderRadius: 6,
-          padding: 10,
-          marginBottom: 10,
-        }}
-      >
-        <div style={{ fontWeight: 600, marginBottom: 6 }}>业务页面批量操作</div>
-        <p style={{ fontSize: 12, marginTop: 0, marginBottom: 8 }}>
-          打开测试环境的职位列表页后点击此按钮，将从上到下依次滚动并对每一项执行预设操作。
-        </p>
-        <button
-          style={{
-            width: '100%',
-            padding: '6px 10px',
-            cursor: 'pointer',
-          }}
-          onClick={handleStartAutomation}
-        >
-          开始列表自动操作
-        </button>
-      </div>
-
       <div
         style={{
           border: '1px solid #eee',
