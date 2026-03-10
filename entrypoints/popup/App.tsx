@@ -9,7 +9,7 @@ interface Progress {
   chatCount: number;
 }
 
-const TARGET_URL = 'http://101.126.129.76/company-master-detail';
+const TARGET_URL = 'https://www.zhipin.com/web/geek/job-recommend';
 
 const STATUS_MAP: Record<Status, { label: string; color: string }> = {
   idle: { label: '待命中', color: '#888' },
@@ -38,7 +38,7 @@ function App() {
   const [tabUrl, setTabUrl] = useState('');
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  const isOnTarget = tabUrl.includes('101.126.129.76');
+  const isOnTarget = tabUrl.includes('zhipin.com');
 
   const scrollToBottom = useCallback(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -117,7 +117,7 @@ function App() {
         '❌ 无法连接到页面脚本',
         '',
         '可能的原因：',
-        '1. 当前不在目标页面 (需要 101.126.129.76)',
+        '1. 当前不在 Boss直聘页面',
         '2. 请点击下方「打开目标页面」后重试',
       ]);
     }
@@ -138,8 +138,8 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1>自动化测试助手</h1>
-        <p className="subtitle">企业循环 · 去沟通 · 留在本页</p>
+        <h1>Boss直聘助手</h1>
+        <p className="subtitle">自动打招呼 · 批量沟通</p>
       </header>
 
       {!isOnTarget && status !== 'running' && (

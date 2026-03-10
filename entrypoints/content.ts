@@ -1,7 +1,6 @@
 export default defineContentScript({
-  matches: ['http://101.126.129.76/*'],
+  matches: ['https://www.zhipin.com/*'],
   main() {
-    // 防止重复注入（programmatic + manifest 同时生效时）
     if ((globalThis as any).__memoExtLoaded) return;
     (globalThis as any).__memoExtLoaded = true;
 
@@ -34,6 +33,10 @@ export default defineContentScript({
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    function randomDelay(min: number, max: number): Promise<void> {
+      return delay(min + Math.floor(Math.random() * (max - min)));
+    }
+
     function isVisible(el: Element | null): boolean {
       if (!el) return false;
       const html = el as HTMLElement;
@@ -43,16 +46,32 @@ export default defineContentScript({
       return rect.width > 0 && rect.height > 0;
     }
 
-    function queryByText(
-      selector: string,
-      text: string | RegExp,
-    ): HTMLElement[] {
+    function queryByText(selector: string, text: string | RegExp): HTMLElement[] {
       return (Array.from(document.querySelectorAll(selector)) as HTMLElement[]).filter(
         (el) => {
           const content = el.textContent || '';
           return typeof text === 'string' ? content.includes(text) : text.test(content);
         },
       );
+    }
+
+    function queryVisible(selector: string): HTMLElement[] {
+      return (Array.from(document.querySelectorAll(selector)) as HTMLElement[]).filter(
+        (el) => isVisible(el),
+      );
+    }
+
+    async function waitForSelector(
+      selector: string,
+      timeout = 10_000,
+    ): Promise<HTMLElement | null> {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const el = document.querySelector(selector) as HTMLElement;
+        if (el && isVisible(el)) return el;
+        await delay(200);
+      }
+      return null;
     }
 
     async function waitForText(
@@ -69,13 +88,70 @@ export default defineContentScript({
       return null;
     }
 
-    async function waitForHidden(el: HTMLElement, timeout = 10_000): Promise<boolean> {
-      const start = Date.now();
-      while (Date.now() - start < timeout) {
-        if (!isVisible(el)) return true;
-        await delay(200);
+    function getJobCards(): HTMLElement[] {
+      const selectors = [
+        '.job-card-wrapper',
+        '.job-card-body',
+        '.job-card-box',
+        '[class*="job-card"]',
+        '.search-job-result li',
+        '.rec-job-list li',
+      ];
+      for (const sel of selectors) {
+        const cards = queryVisible(sel);
+        if (cards.length > 0) return cards;
+      }
+      return [];
+    }
+
+    function getJobInfo(card: HTMLElement): { name: string; company: string } {
+      const nameSelectors = ['.job-name', '.job-title', '[class*="job-name"]'];
+      const companySelectors = ['.company-name', '.info-company', '[class*="company-name"]'];
+
+      let name = '未知职位';
+      let company = '未知公司';
+
+      for (const sel of nameSelectors) {
+        const el = card.querySelector(sel);
+        if (el?.textContent?.trim()) { name = el.textContent.trim(); break; }
+      }
+      for (const sel of companySelectors) {
+        const el = card.querySelector(sel);
+        if (el?.textContent?.trim()) { company = el.textContent.trim(); break; }
+      }
+
+      return { name, company };
+    }
+
+    function findChatButton(): HTMLElement | null {
+      const candidates = queryByText('a, button', /立即沟通/);
+      return candidates.find((el) => isVisible(el)) || null;
+    }
+
+    function findAlreadyChatted(): boolean {
+      const tags = queryByText('a, button, span', /继续沟通/);
+      return tags.some((el) => isVisible(el));
+    }
+
+    function checkLimitDialog(): boolean {
+      const dialogs = queryVisible('.dialog-container, .dialog-wrap, [class*="dialog"], [class*="toast"], [class*="modal"]');
+      for (const d of dialogs) {
+        const text = d.textContent || '';
+        if (/上限|限制|次数已[用满]|沟通数/.test(text)) return true;
       }
       return false;
+    }
+
+    function closeDialog() {
+      const closeBtns = queryVisible(
+        '.dialog-container .close, [class*="dialog"] .close, [class*="dialog"] [class*="close"], [class*="modal"] .close',
+      );
+      if (closeBtns.length > 0) {
+        closeBtns[0].click();
+        return;
+      }
+      const okBtns = queryByText('.dialog-container button, [class*="dialog"] button, [class*="modal"] button', /知道了|确定|关闭/);
+      if (okBtns.length > 0) okBtns[0].click();
     }
 
     async function runTest(loopCount: number) {
@@ -85,22 +161,21 @@ export default defineContentScript({
       progress = { current: 0, total: loopCount, chatCount: 0 };
 
       browser.runtime.sendMessage({ type: 'test-state', running: true }).catch(() => {});
-      addLog('正在查找企业列表...');
+      addLog('正在查找职位列表...');
 
       await delay(1500);
 
-      const companies = queryByText('strong', /示例企业/);
-      const totalLoaded = companies.length;
+      let jobCards = getJobCards();
 
-      if (totalLoaded === 0) {
-        addLog('❌ 未找到包含「示例企业」的列表项');
-        addLog('请确认已登录并在正确的页面上');
+      if (jobCards.length === 0) {
+        addLog('❌ 未找到职位卡片');
+        addLog('请确认已登录，并在职位推荐/搜索页面上');
         running = false;
         browser.runtime.sendMessage({ type: 'test-state', running: false }).catch(() => {});
         return;
       }
 
-      addLog(`找到 ${totalLoaded} 家企业，开始循环 ${loopCount} 次`);
+      addLog(`找到 ${jobCards.length} 个职位，开始循环 ${loopCount} 次`);
 
       for (let i = 0; i < loopCount; i++) {
         if (shouldStop) {
@@ -109,54 +184,65 @@ export default defineContentScript({
         }
 
         progress.current = i + 1;
-        const idx = i % totalLoaded;
 
-        const freshCompanies = queryByText('strong', /示例企业/);
-        if (freshCompanies.length === 0) {
-          addLog('❌ 企业列表丢失，中止');
+        // 每轮重新获取卡片列表（页面可能动态更新）
+        jobCards = getJobCards();
+        if (jobCards.length === 0) {
+          addLog('❌ 职位列表丢失，中止');
           break;
         }
-        const companyItem = freshCompanies[idx % freshCompanies.length];
-        const name = companyItem.textContent?.trim() || `企业#${idx}`;
-        addLog(`[${i + 1}/${loopCount}] 点击: ${name}`);
 
-        // 关闭残留弹窗
-        const staleModal = document.querySelector('.ant-modal-root .ant-modal') as HTMLElement;
-        if (staleModal && isVisible(staleModal)) {
-          const closeBtn = queryByText('.ant-modal-root button', '留在本页')[0];
-          if (closeBtn && isVisible(closeBtn)) {
-            closeBtn.click();
-            await waitForHidden(staleModal, 5000);
-          }
-        }
+        const idx = i % jobCards.length;
+        const card = jobCards[idx];
+        const { name, company } = getJobInfo(card);
+        addLog(`[${i + 1}/${loopCount}] ${company} - ${name}`);
 
-        companyItem.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        // 滚动到卡片并点击
+        card.scrollIntoView({ block: 'center', behavior: 'smooth' });
         await delay(300);
-        companyItem.click();
+        card.click();
+        await randomDelay(500, 1000);
 
-        // 等待「去沟通」按钮
-        const goChat = await waitForText('button', '去沟通', 10_000);
-        if (!goChat) {
-          addLog('  ⚠ 未找到「去沟通」按钮，跳过');
+        // 检查是否已沟通过
+        if (findAlreadyChatted()) {
+          addLog('  ⊘ 已沟通过，跳过');
+          await randomDelay(300, 600);
           continue;
         }
-        goChat.click();
-        progress.chatCount++;
 
-        // 等待「留在本页」按钮
-        const stayBtn = await waitForText('.ant-modal-root button', '留在本页', 10_000);
-        if (stayBtn) {
-          stayBtn.click();
-          const modal = document.querySelector('.ant-modal-root .ant-modal') as HTMLElement;
-          if (modal) await waitForHidden(modal, 10_000);
-        } else {
-          addLog('  ⚠ 未找到「留在本页」按钮');
+        // 查找「立即沟通」按钮
+        let chatBtn = findChatButton();
+        if (!chatBtn) {
+          // 可能需要等一下详情面板加载
+          chatBtn = await waitForText('a, button', /立即沟通/, 5_000);
         }
 
-        await delay(300);
+        if (chatBtn) {
+          chatBtn.click();
+          progress.chatCount++;
+          addLog(`  ✓ 已沟通 (${progress.chatCount})`);
+          await randomDelay(800, 1500);
+        } else {
+          addLog('  ⚠ 未找到「立即沟通」按钮，跳过');
+          await randomDelay(300, 600);
+          continue;
+        }
+
+        // 检查是否弹出每日上限提示
+        await delay(500);
+        if (checkLimitDialog()) {
+          addLog('⚠ 达到每日沟通上限，提前结束');
+          closeDialog();
+          break;
+        }
+
+        // 关闭可能出现的弹窗
+        closeDialog();
+
+        await randomDelay(800, 2000);
       }
 
-      addLog(`✅ 完成！共执行 ${progress.current} 轮，沟通 ${progress.chatCount} 次`);
+      addLog(`✅ 完成！共执行 ${progress.current} 轮，成功沟通 ${progress.chatCount} 个职位`);
       running = false;
       browser.runtime.sendMessage({ type: 'test-state', running: false }).catch(() => {});
     }

@@ -28,7 +28,7 @@ export default defineBackground(() => {
 
   // 插件安装/更新时，向已打开的匹配页面注入 content script
   browser.runtime.onInstalled.addListener(async () => {
-    const tabs = await browser.tabs.query({ url: 'http://101.126.129.76/*' });
+    const tabs = await browser.tabs.query({ url: 'https://www.zhipin.com/*' });
     for (const tab of tabs) {
       if (tab.id) await injectContentScript(tab.id);
     }

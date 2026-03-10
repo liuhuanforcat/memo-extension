@@ -43,7 +43,7 @@ test("循环点击企业 → 去沟通 → 留在本页 ×100", async ({ page, c
       const closeBtn = page.locator(".ant-modal-root button").filter({ hasText: "留在本页" });
       if (await closeBtn.isVisible({ timeout: 300 }).catch(() => false)) {
         await closeBtn.click();
-        await modal.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => {});
+        await modal.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => { });
       }
     }
 
@@ -58,7 +58,7 @@ test("循环点击企业 → 去沟通 → 留在本页 ×100", async ({ page, c
     await stayBtn.waitFor({ state: "visible", timeout: 10_000 });
     await stayBtn.click();
 
-    await modal.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+    await modal.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => { });
     await page.waitForTimeout(300);
   }
 
