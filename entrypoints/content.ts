@@ -123,6 +123,36 @@ export default defineContentScript({
       return { name, company };
     }
 
+    function getScrollableParent(el: HTMLElement): HTMLElement {
+      let parent = el.parentElement;
+      while (parent && parent !== document.body) {
+        const { overflowY } = getComputedStyle(parent);
+        if (
+          (overflowY === 'auto' || overflowY === 'scroll') &&
+          parent.scrollHeight > parent.clientHeight
+        ) {
+          return parent;
+        }
+        parent = parent.parentElement;
+      }
+      return document.documentElement;
+    }
+
+    function scrollInContainer(card: HTMLElement) {
+      const container = getScrollableParent(card);
+      if (container === document.documentElement) {
+        scrollInContainer(card);
+        return;
+      }
+      const containerRect = container.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      const offsetTop = cardRect.top - containerRect.top + container.scrollTop;
+      container.scrollTo({
+        top: offsetTop - container.clientHeight / 2 + cardRect.height / 2,
+        behavior: 'smooth',
+      });
+    }
+
     function findChatButton(): HTMLElement | null {
       const candidates = queryByText('a, button', /立即沟通/);
       return candidates.find((el) => isVisible(el)) || null;
@@ -198,7 +228,7 @@ export default defineContentScript({
         addLog(`[${i + 1}/${loopCount}] ${company} - ${name}`);
 
         // 滚动到卡片并点击
-        card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        scrollInContainer(card);
         await delay(300);
         card.click();
         await randomDelay(500, 1000);
